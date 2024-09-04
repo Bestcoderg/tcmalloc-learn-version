@@ -421,6 +421,8 @@ void PageAllocInfo::PrintInPbtxt(PbtxtRegion *region,
 }
 
 static size_t RoundUp(size_t value, size_t alignment) {
+// 对齐至 alignment 的倍数, 这里 alignment 一定是 (2^n)-1 
+// 先加上y-1,再将小于y的位上的1抹掉
   return (value + alignment - 1) & ~(alignment - 1);
 }
 

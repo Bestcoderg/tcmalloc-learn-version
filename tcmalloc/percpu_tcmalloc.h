@@ -350,6 +350,7 @@ void TcmallocSlab<Shift, NumClasses>::Init(void*(alloc)(size_t size),
                                            size_t (*capacity)(size_t cl),
                                            bool lazy) {
   size_t mem_size = absl::base_internal::NumCPUs() * (1ul << Shift);
+  // slab 统一申请一片内存
   void* backing = alloc(mem_size);
   // MSan does not see writes in assembly.
   ANNOTATE_MEMORY_IS_INITIALIZED(backing, mem_size);
@@ -385,6 +386,7 @@ void TcmallocSlab<Shift, NumClasses>::Init(void*(alloc)(size_t size),
 template <size_t Shift, size_t NumClasses>
 void TcmallocSlab<Shift, NumClasses>::InitCPU(int cpu,
                                               size_t (*capacity)(size_t cl)) {
+  // CPU的region统一申请,CPU region内是连续的
   void** elems = slabs_[cpu].mem;
   for (size_t cl = 0; cl < NumClasses; ++cl) {
     size_t cap = capacity(cl);

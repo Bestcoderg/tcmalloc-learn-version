@@ -156,6 +156,7 @@ std::pair<void*, size_t> MmapRegion::Alloc(size_t request_size,
                                            size_t alignment) {
   // Align on kMinSystemAlloc boundaries to reduce external fragmentation for
   // future allocations.
+  // 从region尾部取内存,
   size_t size = RoundUp(request_size, kMinSystemAlloc);
   if (size < request_size) return {nullptr, 0};
   alignment = std::max(alignment, preferred_alignment);
@@ -230,8 +231,10 @@ std::pair<void*, size_t> RegionManager::Alloc(size_t request_size,
   // want to throw away the existing reserved region, so instead we
   // return a new region specifically targeted for the request.
   if (request_size > kMinMmapAlloc || alignment > kMinMmapAlloc) {
+    // 如果申请的内存较大,使用 mmap 直接映射
     // Align on kMinSystemAlloc boundaries to reduce external fragmentation for
     // future allocations.
+    // 对其到kMinSystemAlloc,防止后续产生的外部碎片
     size_t size = RoundUp(request_size, kMinSystemAlloc);
     if (size < request_size) return {nullptr, 0};
     alignment = std::max(alignment, preferred_alignment);
@@ -268,10 +271,13 @@ std::pair<void*, size_t> RegionManager::Allocate(size_t size, size_t alignment,
 
   // Allocation failed so we need to reserve more memory.
   // Reserve new region and try allocation again.
+  // 使用mmap 申请内存
+  // 返回的地址空间是虚拟地址，此时还没有真正的分配内存
   void* ptr = MmapAligned(kMinMmapAlloc, kMinMmapAlloc, tagged);
   if (!ptr) return {nullptr, 0};
   auto region_type = tagged ? AddressRegionFactory::UsageHint::kInfrequent
                             : AddressRegionFactory::UsageHint::kNormal;
+  // new region 并设置到 tagged_region_/untagged_region_
   region = region_factory->Create(ptr, kMinMmapAlloc, region_type);
   if (!region) {
     munmap(ptr, kMinMmapAlloc);
@@ -314,6 +320,7 @@ void* SystemAlloc(size_t bytes, size_t* actual_bytes, size_t alignment,
   InitSystemAllocatorIfNecessary();
 
   void* result = nullptr;
+  // 用 RegionManager 类来管理 mmap 返回的一段虚拟地址空间
   std::tie(result, *actual_bytes) =
       region_manager->Alloc(bytes, alignment, tagged);
 

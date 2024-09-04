@@ -124,9 +124,17 @@ struct NoHooksPolicy {
   static constexpr bool invoke_hooks() { return false; }
 };
 
+
 // TCMallocPolicy defines the compound policy object containing
 // the OOM, alignment and hooks policies.
 // Is trivially constructible, copyable and destructible.
+
+/// <summary>
+/// 策略模式,TCMallocPolicy 作为策略集合
+/// </summary>
+/// <typeparam name="OomPolicy"></typeparam>
+/// <typeparam name="AlignPolicy"></typeparam>
+/// <typeparam name="HooksPolicy"></typeparam>
 template <typename OomPolicy = CppOomPolicy,
           typename AlignPolicy = DefaultAlignPolicy,
           typename HooksPolicy = InvokeHooksPolicy>

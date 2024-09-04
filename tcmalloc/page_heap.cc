@@ -64,6 +64,7 @@ Span* PageHeap::SearchFreeAndLargeLists(Length n, bool* from_returned) {
     if (!ll->empty()) {
       ASSERT(ll->first()->location() == Span::ON_NORMAL_FREELIST);
       *from_returned = false;
+      // 将此Span分割出长度为n的Span
       return Carve(ll->first(), n);
     }
     // Alternatively, maybe there's a usable returned span.
@@ -100,8 +101,11 @@ Span* PageHeap::New(Length n) {
   bool from_returned;
   Span* result;
   {
+    // 全局锁
     absl::base_internal::SpinLockHolder h(&pageheap_lock);
+    // Span 连续空间
     result = AllocateSpan(n, &from_returned);
+    // 是否需要释放空闲的 Span/Pages 到 system
     if (result) Static::page_allocator()->ShrinkToUsageLimit();
     if (result) info_.RecordAlloc(result->first_page(), result->num_pages());
   }
@@ -115,6 +119,7 @@ Span* PageHeap::New(Length n) {
 }
 
 static bool IsSpanBetter(Span* span, Span* best, Length n) {
+// 优先取较小的page,大小相同则取位置靠前的page
   if (span->num_pages() < n) {
     return false;
   }
@@ -283,7 +288,7 @@ void PageHeap::Delete(Span* span) {
 void PageHeap::MergeIntoFreeList(Span* span) {
   ASSERT(span->location() != Span::IN_USE);
   span->set_freelist_added_time(absl::base_internal::CycleClock::Now());
-
+ 
   // Coalesce -- we guarantee that "p" != 0, so no bounds checking
   // necessary.  We do not bother resetting the stale pagemap
   // entries for the pieces we are merging together because we only
@@ -291,6 +296,8 @@ void PageHeap::MergeIntoFreeList(Span* span) {
   //
   // Note that only similar spans are merged together.  For example,
   // we do not coalesce "returned" spans with "normal" spans.
+  // 
+  // 如果前后有能够合并的Span,则将前后的span合并到这个span中,减少维护的span数量
   const PageID p = span->first_page();
   const Length n = span->num_pages();
   Span* prev = pagemap_->GetDescriptor(p - 1);
@@ -372,6 +379,7 @@ Length PageHeap::ReleaseLastNormalSpan(SpanListPair* slist) {
   s->set_location(Span::IN_USE);
   pageheap_lock.Unlock();
 
+  // 将内存释放给系统
   const Length n = s->num_pages();
   SystemRelease(s->start_address(), s->bytes_in_span());
 
@@ -388,6 +396,7 @@ Length PageHeap::ReleaseAtLeastNPages(Length num_pages) {
 
   // Round robin through the lists of free spans, releasing the last
   // span in each list.  Stop after releasing at least num_pages.
+  // 循环遍历空的span list,每次释放最后一个span
   while (released_pages < num_pages) {
     if (released_pages == prev_released_pages) {
       // Last iteration of while loop made no progress.
@@ -397,6 +406,7 @@ Length PageHeap::ReleaseAtLeastNPages(Length num_pages) {
 
     for (int i = 0; i < kMaxPages+1 && released_pages < num_pages;
          i++, release_index_++) {
+      // 扫描一遍不同大小的spans
       if (release_index_ > kMaxPages) release_index_ = 0;
       SpanListPair* slist =
           (release_index_ == kMaxPages) ? &large_ : &free_[release_index_];
@@ -439,6 +449,8 @@ bool PageHeap::GrowHeap(Length n) {
   n = actual_size >> kPageShift;
 
   stats_.system_bytes += actual_size;
+  // addr => PageID 将addr转为唯一PageID
+  // 这样就可以轻松知道 前后的 page 的状态了
   const PageID p = reinterpret_cast<uintptr_t>(ptr) >> kPageShift;
   ASSERT(p > 0);
 
@@ -449,12 +461,15 @@ bool PageHeap::GrowHeap(Length n) {
   // Make sure pagemap has entries for all of the new pages.
   // Plus ensure one before and one after so coalescing code
   // does not need bounds-checking.
+  // 确保申请的这片内存用于维护的Leaf的存在,维护一下PageMap
   if (pagemap_->Ensure(p - 1, n + 2)) {
     // Pretend the new area is allocated and then return it to cause
     // any necessary coalescing to occur.
     Span* span = Span::New(p, n);
+    // 将span加入pagemap(Leaf)维护
     RecordSpan(span);
     span->set_location(Span::ON_RETURNED_FREELIST);
+    // 将这个新申请的span进行合并与加入freelist的操作
     MergeIntoFreeList(span);
     ASSERT(Check());
     return true;

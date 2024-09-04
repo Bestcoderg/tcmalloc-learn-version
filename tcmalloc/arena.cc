@@ -23,6 +23,7 @@ void* Arena::Alloc(size_t bytes) {
   char* result;
   bytes = ((bytes + kAlignment - 1) / kAlignment) * kAlignment;
   if (free_avail_ < bytes) {
+    // 如果触发内存增长,则每次申请一片大内存
     size_t ask = bytes > kAllocIncrement ? bytes : kAllocIncrement;
     size_t actual_size;
     free_area_ = reinterpret_cast<char*>(

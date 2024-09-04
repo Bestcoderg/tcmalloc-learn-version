@@ -98,7 +98,11 @@ void Span::AverageFreelistAddedTime(const Span* other) {
 // a stack, but since the free objects are not likely to be cache-hot the
 // chain of dependent misses is very cache-unfriendly. The current
 // organization reduces number of cache misses during push/pop.
-//
+// (我们需要组织一个freelist,我们可以使用空闲的object来组织.注意这里我们会将这个链表组织为
+//  栈stack的形式,因为我们希望freelist更加地cache友好,为了达到这个目的,我们会将好几个free object
+// 索引放到一个object中,这样可以令cache的命中率更高.但因为一个object中存储了好几个free object的index
+// 所以我们只能将freelist组织为stack的形式)
+// 
 // Objects in the freelist are represented by 2-byte indices. The index is
 // object offset from the span start divided by a constant. For small objects
 // (<512) divider is 8, for larger -- 64. This allows to fit all indices into
@@ -107,13 +111,18 @@ void Span::AverageFreelistAddedTime(const Span* other) {
 // The freelist has two components. First, we have a small array-based cache
 // (4 objects) embedded directly into the Span (cache_ and cache_size_). We can
 // access this without touching any objects themselves.
+// (freelist 分为两个部分,首先我们做一个高速的缓存,我们可以通过缓存快速取到free object)
 //
 // The rest of the freelist is stored as arrays inside free objects themselves.
 // We can store object_size / 2 indexes in any object, but this is not always
 // sufficient to store the entire contents of a Span in a single object. So we
-// reserve the first index slot in an object to form a linked list. We use the
-// first object in that list (freelist_) as an array to push/pop from; any
+// reserve the first index slot in an object to form a linked list
+// (我们保留第一个槽位的index 'freelist_',以此来形成一个链表). 
+// We use the first object in that list (freelist_) as an array to push/pop from; any
 // subsequent objects in the list's arrays are guaranteed to be full.
+// (我们将freelist_的第一个对象用于链接这个链表,实际上object中的每一个idx都是一个free object index
+//  不过为了组成一个 链表/stack 我们赋予第一个index特殊意义,即认为第一个index是freelist指向下一个list array
+//  的index,这样就将我们的链表串联起来了)
 //
 // Graphically this can be depicted as follows:
 //
@@ -145,9 +154,15 @@ Span::ObjIdx Span::PtrToIdx(void* ptr, size_t size) const {
     // So we avoid loading first_page_ for smaller sizes that have one page per
     // span, instead we compute the offset by taking low kPageShift bits of the
     // pointer.
+    // size 小于 kMultiPageSize 的object分配的span永远只有 1 page
+    // 这种情况下就不需要减去first_page了
     ASSERT(p - first_page_ * kPageSize < kPageSize);
+    // p & (kPageSize -1 ) 取出p在这个page中的位置
+    // / kAlignment 小的对象按照字节对齐(注意是除以8而不是位移8)
     off = (p & (kPageSize - 1)) / kAlignment;
   } else {
+    // 大对象需要考虑一个Span有多个page的情况
+    // 大对象的对齐需要按照8字节对齐
     off = (p - (first_page_ * kPageSize)) / SizeMap::kMultiPageAlignment;
   }
   ObjIdx idx = static_cast<ObjIdx>(off);
@@ -176,18 +191,25 @@ bool Span::FreelistPush(void* ptr, size_t size) {
   allocated_--;
 
   ObjIdx idx = PtrToIdx(ptr, size);
-  if (cache_size_ != kCacheSize) {
+  if (cache_size_ != kCacheSize) 
+  {
     // Have empty space in the cache, push there.
     cache_[cache_size_] = idx;
     cache_size_++;
-  } else if (freelist_ != kListEnd &&
+  } 
+  else if (freelist_ != kListEnd &&
              // -1 because the first slot is used by freelist link.
-             embed_count_ != size / sizeof(ObjIdx) - 1) {
+             // 可以先看 span.cc:137 注释
+             embed_count_ != size / sizeof(ObjIdx) - 1) 
+      // 这里即为freelist不为空的情况
+  {
     // Push onto the first object on freelist.
     ObjIdx* host;
-    if (size <= SizeMap::kMultiPageSize) {
+    if (size <= SizeMap::kMultiPageSize) 
+    {
       // Avoid loading first_page_ in this case (see the comment in PtrToIdx).
       ASSERT(num_pages_ == 1);
+      // 按照对齐的操作取出freelist的头
       host = reinterpret_cast<ObjIdx*>(
           (reinterpret_cast<uintptr_t>(ptr) & ~(kPageSize - 1)) +
           static_cast<uintptr_t>(freelist_) * kAlignment);

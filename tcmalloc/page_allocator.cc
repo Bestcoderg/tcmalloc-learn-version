@@ -72,13 +72,16 @@ bool want_hpaa() {
 
 PageAllocator::PageAllocator() {
   const bool kUseHPAA = want_hpaa();
-  if (kUseHPAA) {
+  if (kUseHPAA) 
+  {
     untagged_impl_ =
         new (&choices_[0].hpaa) HugePageAwareAllocator(/*tagged=*/false);
     tagged_impl_ =
         new (&choices_[1].hpaa) HugePageAwareAllocator(/*tagged=*/true);
     alg_ = HPAA;
-  } else {
+  } 
+  else 
+  {
     untagged_impl_ = new (&choices_[0].ph) PageHeap(/*tagged=*/false);
     tagged_impl_ = new (&choices_[1].ph) PageHeap(/*tagged=*/true);
     alg_ = PAGE_HEAP;

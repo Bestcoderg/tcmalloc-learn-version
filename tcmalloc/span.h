@@ -233,7 +233,6 @@ template <unsigned int align>
 size_t Span::FreelistPopBatchSized(void** __restrict batch, size_t N,
                                    size_t size) {
   size_t result = 0;
-
   // Pop from cache.
   auto csize = cache_size_;
   auto cache_reads = csize < N ? csize : N;

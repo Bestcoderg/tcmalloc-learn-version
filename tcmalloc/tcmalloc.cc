@@ -1800,6 +1800,8 @@ fast_alloc(Policy policy, size_t size, CapacityPtr capacity = nullptr) {
   // path. If malloc is not yet initialized, we may end up with cl == 0
   // (regardless of size), but in this case should also delegate to the slow
   // path by the fast path check further down.
+
+  // cl = size-class index
   uint32_t cl;
   bool is_small = Static::sizemap()->GetSizeClass(size, policy.align(), &cl);
   if (ABSL_PREDICT_FALSE(!is_small)) {
@@ -1810,6 +1812,7 @@ fast_alloc(Policy policy, size_t size, CapacityPtr capacity = nullptr) {
   // cache for this thread before we try to sample, as slow_alloc will
   // also try to sample the allocation.
 #ifdef TCMALLOC_DEPRECATED_PERTHREAD
+  // Per-Thread Mode(由于消耗的内存会随着thread的数量增加,导致一部分内存无意义的消耗)
   ThreadCache* const cache = ThreadCache::GetCacheIfPresent();
   if (ABSL_PREDICT_FALSE(cache == nullptr)) {
     return slow_alloc(policy, size, capacity);
@@ -1819,6 +1822,8 @@ fast_alloc(Policy policy, size_t size, CapacityPtr capacity = nullptr) {
   // - this allocation does not need to be sampled
   // - no new/delete hooks need to be invoked
   // - no need to initialize thread globals, data or caches.
+  // 如果不需要初始化线程的数据/全局数据的话 return true
+  // GetThreadSampler 在第一次调用将创建 ThreadCache
   // The method updates 'bytes until next sample' thread sampler counters.
   if (ABSL_PREDICT_FALSE(!GetThreadSampler()->TryRecordAllocationFast(size))) {
     return slow_alloc(policy, size, capacity);
@@ -1834,6 +1839,7 @@ fast_alloc(Policy policy, size_t size, CapacityPtr capacity = nullptr) {
   void* ret;
 #ifndef TCMALLOC_DEPRECATED_PERTHREAD
   // The CPU cache should be ready.
+  // Per-Cpu Mode 针对上述 Per-Thread Mode 问题提出的方案
   ret = Static::cpu_cache()->Allocate<Policy::handle_oom>(cl);
 #else  // !defined(TCMALLOC_DEPRECATED_PERTHREAD)
   // The ThreadCache should be ready.
@@ -2295,4 +2301,7 @@ class TCMallocGuard {
   }
 };
 
+/// <summary>
+/// 在main之前初始化
+/// </summary>
 static TCMallocGuard module_enter_exit_hook;

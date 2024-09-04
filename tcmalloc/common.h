@@ -134,6 +134,7 @@ static const size_t kStealAmount = 1 << 16;
 static const size_t kDefaultProfileSamplingRate = 1 << 21;
 static const size_t kMinPages = 8;
 #elif TCMALLOC_PAGE_SHIFT == 13
+// 8K
 static const size_t kPageShift = 13;
 static const size_t kNumClasses = 86;
 static const size_t kMaxSize = 256 * 1024;
@@ -302,6 +303,7 @@ class SizeMap {
   // first member so that it inherits the overall alignment of a SizeMap
   // instance.  In particular, if we create a SizeMap instance that's cache-line
   // aligned, this member is also aligned to the width of a cache line.
+  // 索引到 size-class index, 相当于一个映射表,为了快速找到对应的size-class(我们很难直接使用size 直接找到 size-class)
   unsigned char class_array_[kClassArraySize];
 
   // Number of objects to move between a per-thread list and a central

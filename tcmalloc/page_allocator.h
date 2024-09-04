@@ -31,6 +31,9 @@
 
 namespace tcmalloc {
 
+/// <summary>
+/// 对外 allocate 的接口类
+/// </summary>
 class PageAllocator {
  public:
   PageAllocator();
@@ -104,6 +107,7 @@ class PageAllocator {
     PageHeap ph;
     HugePageAwareAllocator hpaa;
   } choices_[2];
+  
   PageAllocatorInterface* untagged_impl_;
   PageAllocatorInterface* tagged_impl_;
   Algorithm alg_;

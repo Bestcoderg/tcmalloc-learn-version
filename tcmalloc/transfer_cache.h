@@ -104,6 +104,7 @@ class TransferCache {
 
   // Pointer to array of free objects.  Use GetSlot() to get pointers to
   // entries.
+  // 指向所有free对象的指针数组,数组大小是固定的,超出数组的元素将被放入freelist_
   void **slots_ GUARDED_BY(lock_);
 
   // The current number of slots for this size class.  This is an adaptive value

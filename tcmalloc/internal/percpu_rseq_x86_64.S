@@ -281,7 +281,7 @@ DEFINE_UPSTREAM_CS(TcmallocSlab_PerCpuCmpxchg64)
  *
  * By default assembler will not align these symbols at all (not even on 8).
  * But their performance is significantly affected by starting position
- * (i.e. +/-20%). It's not that they simply need to be aligned on a sufficient
+ * (i.e. +/-20%). Its not that they simply need to be aligned on a sufficient
  * power of two. For example, offset 17 from a 64-byte aligned address worked
  * good as well. Aligning on 64 seems to work good with this particular
  * implementation, but more importantly it makes performance less affected by
@@ -394,23 +394,23 @@ DEFINE_UPSTREAM_CS(TcmallocSlab_Push_FixedShift)
   .globl TcmallocSlab_Pop
   .type  TcmallocSlab_Pop, @function
 TcmallocSlab_Pop:
-  .cfi_startproc
-.LTcmallocSlab_Pop_region0:
-  START_RSEQ(TcmallocSlab_Pop);
-  FETCH_CPU(%eax);
-  shl %cl, %rax; /* multiply cpu by cache size*/
-  lea (%rdi, %rax), %r11;
-  movzwq (%r11, %rsi, 8), %r10; /* current */
-  movzwq 4(%r11, %rsi, 8), %r9; /* begin */
-  cmp %r9, %r10;
-  jbe .LTcmallocSlab_Pop_region2;
-  mov -16(%r11, %r10, 8), %rax;
-  prefetcht0 (%rax);
-  movq -8(%r11, %r10, 8), %rax;
-  decl (%r11, %rsi, 8);
+  .cfi_startproc  // 函数的开始
+.LTcmallocSlab_Pop_region0:  // 标签
+  START_RSEQ(TcmallocSlab_Pop);  // 启动 rseq 区域,如果发生上下文切换或是信号处理则回到rseq起点
+  FETCH_CPU(%eax);     // 获取当前 CPU ID
+  shl %cl, %rax; /* multiply cpu by cache size*/  // 将 CPU ID 左移cl位,计算本地缓存的偏移量
+  lea (%rdi, %rax), %r11;     
+  movzwq (%r11, %rsi, 8), %r10; /* current */     // 从 Slab 中读取当前的元素指针
+  movzwq 4(%r11, %rsi, 8), %r9; /* begin */       // 读取起始元素的指针
+  cmp %r9, %r10;                                  // 比较当前元素数量和起始索引，判断 Slab 是否为空。
+  jbe .LTcmallocSlab_Pop_region2;                 // 如果当前元素数小于等于起始索引，则跳转到处理 Slab 下溢的代码
+  mov -16(%r11, %r10, 8), %rax;                   // 从 Slab 中读取并弹出一个元素
+  prefetcht0 (%rax);                              // 将读取的内存块预取到 L1 缓存中，以加速后续的访问
+  movq -8(%r11, %r10, 8), %rax;                   
+  decl (%r11, %rsi, 8);							  // 将当前元素计数减 1，更新 Slab 的状态
 .LTcmallocSlab_Pop_region1:
 .LTcmallocSlab_Pop_commit:
-  ret;
+  ret;                                            // 如果元素成功弹出，函数直接返回
 .LTcmallocSlab_Pop_region2:
   mov %rax, %rdi; /* rdi = cpu */
   shr %cl, %rdi; /* undo shift in the beginning of the function */

@@ -320,6 +320,7 @@ inline void ABSL_ATTRIBUTE_ALWAYS_INLINE ThreadCache::Deallocate(void* ptr,
   // There are two relatively uncommon things that require further work.
   // In the common case we're done, and in that case we need a single branch
   // because of the bitwise-or trick that follows.
+  // 两种情况需要继续执行 1.ThreadCache 总体数据过大 2.FreeList[cl]的长度超过最大值
   if ((list_headroom | size_headroom) < 0) {
     DeallocateSlow(ptr, list, cl);
   } else {

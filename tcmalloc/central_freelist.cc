@@ -43,13 +43,17 @@ static Span* MapObjectToSpan(void* object) {
 
 Span* CentralFreeList::ReleaseToSpans(void* object, Span* span) {
   if (span->FreelistEmpty()) {
+    // 全满的情况
+    // 如果Span是空的,需要加入nonempty_的索引中
     nonempty_.prepend(span);
   }
 
+  // 如果span在object释放后完全空了,则return此 span,否则return nullptr
   if (span->FreelistPush(object, object_size_)) {
     return nullptr;
   }
 
+  // 全空的情况
   counter_.LossyAdd(-objects_per_span_);
   num_spans_.LossyAdd(-1);
   span->RemoveFromList();  // from nonempty_
@@ -80,6 +84,7 @@ void CentralFreeList::InsertRange(void** batch, int N) {
     for (int i = 0; i < N; ++i) {
       Span* span = ReleaseToSpans(batch[i], spans[i]);
       if (span) {
+        // 完全空的span
         free_spans[free_count] = span;
         free_count++;
       }
@@ -91,6 +96,7 @@ void CentralFreeList::InsertRange(void** batch, int N) {
   if (free_count) {
     absl::base_internal::SpinLockHolder h(&pageheap_lock);
     for (int i = 0; i < free_count; ++i) {
+      // 回收全空的span
       ASSERT(!IsTaggedMemory(free_spans[i]->start_address()));
       Static::pagemap()->UnregisterSizeClass(free_spans[i]);
       Static::page_allocator()->Delete(free_spans[i], /*tagged=*/false);
@@ -102,16 +108,20 @@ int CentralFreeList::RemoveRange(void** batch, int N) {
   ASSERT(N > 0);
   absl::base_internal::SpinLockHolder h(&lock_);
   if (nonempty_.empty()) {
+    // 没有空闲的span,需要向PageHeap申请新的Span
     Populate();
   }
 
   int result = 0;
   while (result < N && !nonempty_.empty()) {
+    // 如果 nonempty 中有 span 则说明 CentralFreeList 至少有一个空闲的 object[cl]
+    // 实际上 RemoveRange 触发的时候 object[cl] 最少只需要一个,批量申请是为了优化性能
+    // 所以下面的代码地方并没有要求一定fetch到N个object[cl],当nonempty空了就直接返回
     Span* span = nonempty_.first();
     int here = span->FreelistPopBatch(batch + result, N - result, object_size_);
     ASSERT(here > 0);
     if (span->FreelistEmpty()) {
-      span->RemoveFromList();  // from nonempty_
+      span->RemoveFromList();  // from nonempty
     }
     result += here;
   }
@@ -135,6 +145,7 @@ void CentralFreeList::Populate() NO_THREAD_SAFETY_ANALYSIS {
   ASSERT(span->num_pages() == npages);
 
   Static::pagemap()->RegisterSizeClass(span, size_class_);
+  // 将刚申请的span组成objects放入freelist
   span->BuildFreelist(object_size_, objects_per_span_);
 
   // Add span to list of non-empty spans

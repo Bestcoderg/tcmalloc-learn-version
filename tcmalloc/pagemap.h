@@ -42,13 +42,22 @@ namespace tcmalloc {
 typedef void* (*PagemapAllocator)(size_t);
 void* MetaDataAlloc(size_t bytes);
 
+
+/// <summary>
+/// PageMap 主要用于维护 page -> span 的映射
+/// </summary>
+/// <typeparam name="BITS"></typeparam>
+/// <typeparam name="Allocator"></typeparam>
 template <int BITS, PagemapAllocator Allocator>
 class PageMap2 {
  private:
   // The leaf node (regardless of pointer size) always maps 2^15 entries;
   // with 8K pages, this gives us 256MB mapped per leaf node.
-  static const int kLeafBits = 15;
+  // 246M / 8K = 32K = 2^15, 一个leaf有32k个page
+  static const int kLeafBits = 15; 
   static const int kLeafLength = 1 << kLeafBits;
+  // BITS = all virtual addr - page shift
+  // BITS - kLeafBits = all Leaf number
   static const int kRootBits = (BITS >= kLeafBits) ? (BITS - kLeafBits) : 0;
   // (1<<kRootBits) must not overflow an "int"
   static_assert(kRootBits < sizeof(int) * 8 - 1, "kRootBits is too large");
@@ -70,6 +79,10 @@ class PageMap2 {
     void* hugepage[kLeafHugepages];
   };
 
+  // 将整个虚拟地址,分割为 page / Leaf
+  // kRootLength为整个虚拟地址所能分割的Leaf的个数,即全地址空间映射
+  // 再分一层Leaf的好处是可以让初始化申请的数组长度大幅度减少,每个Leaf涵盖的
+  // 地址范围所需要的span指针的申请可以延迟到这个Leaf范围有span加入时
   Leaf* root_[kRootLength];             // Top-level node
   size_t bytes_used_;
 
@@ -80,6 +93,7 @@ class PageMap2 {
 
   // No locks required.  See SYNCHRONIZATION explanation at top of tcmalloc.cc.
   void* get(Number k) const NO_THREAD_SAFETY_ANALYSIS {
+  // 通过PageID找到span
     const Number i1 = k >> kLeafBits;
     const Number i2 = k & (kLeafLength - 1);
     if ((k >> BITS) > 0 || root_[i1] == nullptr) {
@@ -151,6 +165,7 @@ class PageMap2 {
 
   bool Ensure(Number start, size_t n) {
     ASSERT(n > 0);
+    // 这个函数用于确保申请的这片内存用于维护的Leaf的存在
     for (Number key = start; key <= start + n - 1; ) {
       const Number i1 = key >> kLeafBits;
 
@@ -412,6 +427,7 @@ class PageMap {
   void MapRootWithSmallPages();
 
  private:
+// radix tree
 #ifdef TCMALLOC_USE_PAGEMAP3
   PageMap3<kAddressBits - kPageShift, MetaDataAlloc> map_;
 #else

@@ -180,14 +180,19 @@ void TransferCache::InsertRange(absl::Span<void *> batch, int N) {
   ASSERT(0 < N && N <= B);
   int32_t used_slots = used_slots_.load(std::memory_order_relaxed);
   if (N == B && used_slots + N <= max_cache_slots_) {
+    // 仅接受num_objects_to_move大小的插入
+    // absl(google)
     absl::base_internal::SpinLockHolder h(&lock_);
-    if (MakeCacheSpace(N)) {
+    if (MakeCacheSpace(N)) 
+    {
+      // batch中的元素可以直接全部放入slots_中
       // MakeCacheSpace can drop the lock, so refetch
       used_slots = used_slots_.load(std::memory_order_relaxed);
       ASSERT(0 <= used_slots && used_slots + N <= max_cache_slots_);
       used_slots_.store(used_slots + N, std::memory_order_relaxed);
 
       void **entry = GetSlot(used_slots);
+      // 将batch中的对象放回到slots_中
       memcpy(entry, batch.data(), sizeof(void *) * N);
       tracking::Report(kTCInsertHit, freelist_.size_class(), 1);
       return;
@@ -215,7 +220,10 @@ void TransferCache::InsertRange(absl::Span<void *> batch, int N) {
     // First of all fill up the rest of the batch with elements from the
     // transfer cache.
     int extra = B - N;
+    // batch 是 absl::Span 而不是 tcmalloc::Span 是一个对原生数组的包装
+    // batch.size() 为原生数组长度 kMaxObjectsToMove
     if (N > 1 && extra > 0 && used_slots > 0 && batch.size() >= B) {
+      // 将batch中的元素凑够 num_objects_to_move 个才归还freelist
       // Take at most all the objects present
       extra = std::min(extra, used_slots);
       ASSERT(extra + N <= kMaxObjectsToMove);
@@ -242,7 +250,8 @@ int TransferCache::RemoveRange(void **batch, int N) {
   const int B = Static::sizemap()->num_objects_to_move(freelist_.size_class());
   int fetch = 0;
   int32_t used_slots = used_slots_.load(std::memory_order_relaxed);
-  if (N == B && used_slots >= N) {
+  if (N == B && used_slots >= N) 
+  {// 如果 used_slots 中空闲的元素可以满足
     absl::base_internal::SpinLockHolder h(&lock_);
     // Refetch with the lock
     used_slots = used_slots_.load(std::memory_order_relaxed);
@@ -255,7 +264,9 @@ int TransferCache::RemoveRange(void **batch, int N) {
       tracking::Report(kTCRemoveHit, freelist_.size_class(), 1);
       return N;
     }
-  } else if (arbitrary_transfer_ && used_slots >= 0) {
+  } 
+  else if (arbitrary_transfer_ && used_slots >= 0) 
+  {// 空闲元素数量不满足,则先使用slots中的
     absl::base_internal::SpinLockHolder h(&lock_);
     // Refetch with the lock
     used_slots = used_slots_.load(std::memory_order_relaxed);

@@ -61,6 +61,7 @@ class PageHeapAllocator {
   }
 
   void Delete(T* p) EXCLUSIVE_LOCKS_REQUIRED(pageheap_lock) {
+    /// 将free_list直接存入这个空节点内存中，然后将free_list的头指针指向这个节点地址，相当于将空节点内存复用为free_list
     *(reinterpret_cast<void**>(p)) = free_list_;
     free_list_ = p;
     stats_.in_use--;
@@ -72,6 +73,7 @@ class PageHeapAllocator {
 
  private:
   // Arena from which to allocate memory
+  // 对于每个模板类的内存申请再做优化,每次的内存申请走Arena,Arena仅增长不回收
   Arena* arena_;
 
   // Free list of already carved objects

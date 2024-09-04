@@ -107,6 +107,7 @@ class PageHeap : public PageAllocatorInterface {
   // Statistics on system, free, and unmapped bytes
   BackingStats stats_ GUARDED_BY(pageheap_lock);
 
+  // ==========================================================
   Span* SearchFreeAndLargeLists(Length n, bool* from_returned)
       EXCLUSIVE_LOCKS_REQUIRED(pageheap_lock);
 

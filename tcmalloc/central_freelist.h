@@ -26,6 +26,8 @@
 namespace tcmalloc {
 
 // Data kept per size-class in central cache.
+// 每个大小的TransferCache持有一个CentralFreeList
+// 用于管理持有的spans(相较TransferCache是管理objects)
 class CentralFreeList {
  public:
   // A CentralFreeList may be used before its constructor runs.

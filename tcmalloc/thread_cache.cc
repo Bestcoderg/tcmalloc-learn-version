@@ -71,6 +71,7 @@ void ThreadCache::Cleanup() {
 // Remove some objects of class "cl" from central cache and add to thread heap.
 // On success, return the first object for immediate use; otherwise return NULL.
 void* ThreadCache::FetchFromCentralCache(size_t cl, size_t byte_size) {
+  // 这个时候 FreeList[cl] 中已经没有空闲的元素了
   FreeList* list = &list_[cl];
   ASSERT(list->empty());
   const int batch_size = Static::sizemap()->num_objects_to_move(cl);
@@ -84,6 +85,7 @@ void* ThreadCache::FetchFromCentralCache(size_t cl, size_t byte_size) {
   }
 
   if (--fetch_count > 0) {
+    // 第一个元素需要立刻返回,所以这里先减去
     size_ += byte_size * fetch_count;
     list->PushBatch(fetch_count, batch + 1);
   }
@@ -110,6 +112,7 @@ void* ThreadCache::FetchFromCentralCache(size_t cl, size_t byte_size) {
 }
 
 void ThreadCache::ListTooLong(FreeList* list, size_t cl) {
+  // List 过长时,将num_objects_to_move的元素还给CentralCache
   const int batch_size = Static::sizemap()->num_objects_to_move(cl);
   ReleaseToCentralCache(list, cl, batch_size);
 
@@ -142,10 +145,23 @@ void ThreadCache::ReleaseToCentralCache(FreeList* src, size_t cl, int N) {
   // We return prepackaged chains of the correct size to the central cache.
   void* batch[kMaxObjectsToMove];
   int batch_size = Static::sizemap()->num_objects_to_move(cl);
+  // TODO : 为什么这里需要将N分为batch_size,分批处理
   while (N > batch_size) {
     src->PopBatch(batch_size, batch);
     static_assert(ABSL_ARRAYSIZE(batch) >= kMaxObjectsToMove,
                   "not enough space in batch");
+    /*
+     * 注意下面使用的是 absl::Span 而不是 tcmalloc::Span
+     * 实现大致如下所示,即萃取出数组长度,对原生数组做了包装
+     * 使用size()取出此原生数组的长度
+     * =======================================================
+	  constexpr Span(pointer array, size_type length) noexcept
+	  : ptr_(array), len_(length) {}
+      template <size_t N>
+      constexpr Span(T (&a)[N]) noexcept 
+	      : Span(a, N) {}
+     * =======================================================
+     */
     Static::transfer_cache()[cl].InsertRange(absl::Span<void*>(batch),
                                              batch_size);
     N -= batch_size;
@@ -262,12 +278,14 @@ ThreadCache* ThreadCache::CreateCacheIfNecessary() {
 #endif
 
   {
+    // 访问临界区资源加锁
     absl::base_internal::SpinLockHolder h(&pageheap_lock);
     const pthread_t me = pthread_self();
 
     // This may be a recursive malloc call from pthread_setspecific()
     // In that case, the heap for this thread has already been created
     // and added to the linked list.  So we search for that first.
+    // 处理递归的特殊情况
     if (maybe_reentrant) {
       for (ThreadCache* h = thread_heaps_; h != nullptr; h = h->next_) {
         if (h->tid_ == me) {
@@ -301,6 +319,7 @@ ThreadCache* ThreadCache::CreateCacheIfNecessary() {
 ThreadCache* ThreadCache::NewHeap(pthread_t tid) {
   // Create the heap and add it to the linked list
   ThreadCache *heap = Static::threadcache_allocator()->New();
+  // 由于复用了内存,init中需要保证所有的对象初始化
   heap->Init(tid);
   heap->next_ = thread_heaps_;
   heap->prev_ = nullptr;

@@ -46,6 +46,9 @@ class CPUCache;
 class PageMap;
 class ThreadCache;
 
+/// <summary>
+/// æ≤Ã¨µ˜”√¿‡
+/// </summary>
 class Static {
  public:
   // True if InitIfNecessary() has run to completion.
