@@ -186,6 +186,7 @@ inline size_t TcmallocSlab<Shift, NumClasses>::Grow(int cpu, size_t cl,
     if (old.IsLocked() || old.end - old.begin == max_cap) {
       return 0;
     }
+    // 不超过 最大的容量
     uint16_t n = std::min<uint16_t>(len, max_cap - (old.end - old.begin));
     Header hdr = old;
     hdr.end += n;
@@ -297,6 +298,7 @@ inline std::atomic<int64_t>* TcmallocSlab<Shift, NumClasses>::GetHeader(
 template <size_t Shift, size_t NumClasses>
 inline typename TcmallocSlab<Shift, NumClasses>::Header
 TcmallocSlab<Shift, NumClasses>::LoadHeader(std::atomic<int64_t>* hdrp) {
+  // atomic 类型整体存取
   uint64_t raw = hdrp->load(std::memory_order_relaxed);
   Header hdr;
   memcpy(&hdr, &raw, sizeof(hdr));
@@ -306,6 +308,7 @@ TcmallocSlab<Shift, NumClasses>::LoadHeader(std::atomic<int64_t>* hdrp) {
 template <size_t Shift, size_t NumClasses>
 inline void TcmallocSlab<Shift, NumClasses>::StoreHeader(
     std::atomic<int64_t>* hdrp, Header hdr) {
+  // atomic 类型整体存取
   uint64_t raw;
   memcpy(&raw, &hdr, sizeof(raw));
   hdrp->store(raw, std::memory_order_relaxed);
@@ -338,6 +341,7 @@ inline void TcmallocSlab<Shift, NumClasses>::Header::Lock() {
   // express this without undefined behavior.
   std::atomic<int32_t>* p = reinterpret_cast<std::atomic<int32_t>*>(&begin);
   Header hdr;
+  // 将begin与end设置为无效数阻止取
   hdr.begin = 0xffffu;
   hdr.end = 0;
   int32_t raw;
@@ -350,7 +354,7 @@ void TcmallocSlab<Shift, NumClasses>::Init(void*(alloc)(size_t size),
                                            size_t (*capacity)(size_t cl),
                                            bool lazy) {
   size_t mem_size = absl::base_internal::NumCPUs() * (1ul << Shift);
-  // slab 统一申请一片内存
+  // slab 统一申请一片内存,per-cpu slab
   void* backing = alloc(mem_size);
   // MSan does not see writes in assembly.
   ANNOTATE_MEMORY_IS_INITIALIZED(backing, mem_size);
@@ -400,13 +404,17 @@ void TcmallocSlab<Shift, NumClasses>::InitCPU(int cpu,
     // this is slow if it's not a valid pointer. To avoid this problem
     // when popping the last item, keep one fake item before the actual
     // ones (that points, safely, to itself.)
+    // 每段开始的第一个指针指向自己,处理预取的指针没有被复制的问题
     *elems = elems;
     elems++;
+    // header 中存size class 的 index 位置
     size_t begin = elems - reinterpret_cast<void**>(CpuMemoryStart(cpu));
     hdr.current = begin;
     hdr.begin = begin;
     hdr.end = begin;
     hdr.end_copy = begin;
+    // 这里设定了 slab[cl] 的最大容量,而不是容量
+    // 容量是 end - begin
     elems += cap;
     CHECK_CONDITION(reinterpret_cast<char*>(elems) -
                         reinterpret_cast<char*>(CpuMemoryStart(cpu)) <=
@@ -459,6 +467,7 @@ void TcmallocSlab<Shift, NumClasses>::Drain(int cpu, void* ctx,
     FenceCpu(cpu);
     done = true;
     for (size_t cl = 0; cl < NumClasses; ++cl) {
+      // 必须先锁所有的header
       Header hdr = LoadHeader(GetHeader(cpu, cl));
       if (!hdr.IsLocked()) {
         // Header was overwritten by Grow/Shrink. Retry.
@@ -476,6 +485,7 @@ void TcmallocSlab<Shift, NumClasses>::Drain(int cpu, void* ctx,
     size_t n = hdr.current - begin[cl];
     size_t cap = hdr.end_copy - begin[cl];
     void** batch = reinterpret_cast<void**>(GetHeader(cpu, 0) + begin[cl]);
+    // 释放 cpu-cache 中的 objects
     f(ctx, cl, batch, n, cap);
   }
 

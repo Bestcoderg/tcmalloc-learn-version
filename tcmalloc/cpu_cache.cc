@@ -144,6 +144,7 @@ void *CPUCache::Refill(int cpu, size_t cl) {
   void *batch[kMaxObjectsToMove];
   do {
     const size_t want = std::min(batch_length, target - total);
+    // 向transfer_cache申请新的objects(每次batch_length,分批申请)
     got = Static::transfer_cache()[cl].RemoveRange(batch, want);
     if (got == 0) {
       break;
@@ -151,12 +152,16 @@ void *CPUCache::Refill(int cpu, size_t cl) {
     total += got;
     i = got;
     if (result == nullptr) {
+      // result 代表这次返回的一个 object 用于结果
+      // 如果result还没设置,则将申请的objects中的一个用于返回
       i--;
       result = batch[i];
     }
     if (i) {
+      // 申请的 objects 放入 slab[cl]
       i -= freelist_.PushBatch(cl, batch, i);
       if (i != 0) {
+        // i不等于0代表 PushBatch失败，线程已经被调度到其他CPU核心，那么需要将分配到的空闲对象释放给TransferCache
         static_assert(ABSL_ARRAYSIZE(batch) >= kMaxObjectsToMove,
                       "not enough space in batch");
         Static::transfer_cache()[cl].InsertRange(absl::Span<void *>(batch), i);
@@ -179,6 +184,9 @@ size_t CPUCache::UpdateCapacity(int cpu, size_t cl, size_t batch_length,
                                 size_t *returned) {
   // Freelist size balancing strategy:
   //  - We grow a size class only on overflow/underflow.
+  //  我们仅在请求或是释放的时候,当发生cache overflow/underflow 上溢/下溢 时
+  //  去改变 slab[cl] 设定的cache大小,注意这个大小并不是max_capacity 最大容量
+  //  在 slab init 的时候已经设定好了
   //  - We shrink size classes in Steal as it scans all size classes.
   //  - If overflows/underflows happen on a size class, we want to grow its
   //    capacity to at least 2 * batch_length. It enables usage of the
@@ -221,12 +229,14 @@ size_t CPUCache::UpdateCapacity(int cpu, size_t cl, size_t batch_length,
   if ((grow_by_one || grow_by_batch) && capacity != max_capacity) {
     size_t increase = 1;
     if (grow_by_batch) {
+      // 此次的最大增长
       increase = std::min(batch_length, max_capacity - capacity);
     } else if (!overflow && capacity < batch_length) {
       // On underflow we want to grow to at least batch size, because that's
       // what we want to request from transfer cache.
       increase = batch_length - capacity;
     }
+    // 增加slab的cache容量(不超过max_capacity)
     Grow(cpu, cl, increase, to_return, returned);
     capacity = freelist_.Capacity(cpu, cl);
   }
@@ -268,6 +278,10 @@ void CPUCache::Grow(int cpu, size_t cl, size_t desired_increase,
   // First, there might be unreserved slack.  Take what we can.
   size_t before, after;
   do {
+    // resize_ 记录了 cpu_cache 中一些快捷使用的信息, available 代表 slab 中
+    // 空闲的空间,这并不意味着我们要改变 slab 的大小 或是改变 slab[cl] 的最大容量
+    // 这两点都是在 slab init 的时候确定的, available 只是一个信息要我们快速拿到slab的状态
+    // 最终 slab[cl] 增加的容量还是被 max_capacity 限制
     before = resize_[cpu].available.load(std::memory_order_relaxed);
     acquired_bytes = std::min(before, desired_bytes);
     after = before - acquired_bytes;
@@ -286,6 +300,9 @@ void CPUCache::Grow(int cpu, size_t cl, size_t desired_increase,
   size_t actual_increase = acquired_bytes / size;
   actual_increase = std::min(actual_increase, desired_increase);
   // Remember, Grow may not give us all we ask for.
+  // 增长容量,注意最大容量和容量的区别,最大容量如下公式在init时设定
+  // 目前增长的是运行过程中 slab[cl] cache 的 objects 的容量
+  // Slab = 89 * 8 + 8 * ((2048 + 1) * 10 + (152 + 1) * 78 + 88) = 254 KiB
   size_t increase = freelist_.Grow(cpu, cl, actual_increase, MaxCapacity(cl));
   size_t increased_bytes = increase * size;
   if (increased_bytes < acquired_bytes) {
@@ -317,14 +334,15 @@ size_t CPUCache::Steal(int cpu, size_t dest_cl, size_t bytes,
       // First, no sense in picking your own pocket.
       continue;
     }
+    // 容量
     const size_t capacity = freelist_.Capacity(cpu, source_cl);
     if (capacity == 0) {
       // Nothing to steal.
       continue;
     }
+    // 已经使用的长度
     const size_t length = freelist_.Length(cpu, source_cl);
-    const size_t batch_length =
-        Static::sizemap()->num_objects_to_move(source_cl);
+    const size_t batch_length = Static::sizemap()->num_objects_to_move(source_cl);
     size_t size = Static::sizemap()->class_to_size(source_cl);
 
     // Clock-like algorithm to prioritize size classes for shrinking.
